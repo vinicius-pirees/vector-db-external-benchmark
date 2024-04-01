@@ -45,32 +45,30 @@ class Redis(VectorDB):
         drop_old: bool = False,
         **kwargs,
     ):
-    
+
         self.db_config = db_config if db_config is not None else default_config()
         self.index_name = database_name
-        self.doc_prefix = "doc:"
+        self.doc_prefix = f"{database_name}:"
+        self.vector_dimension = vector_dimension
 
-        conn = redis.Redis(
+        self.conn = redis.Redis(
             host=self.db_config.host.get_secret_value(),
             port=self.db_config.port.get_secret_value(),
             password=self.db_config.password.get_secret_value(),
             db=0,
         )
-        self.__make_index(vector_dimension, conn)
-        conn.close()
-        conn = None
+        self._make_index()
 
 
-    def remove_index(self):
+    def remove_database(self):
         try:
             self.conn.ft(self.index_name).dropindex()
         except ResponseError:
             print(f"index {self.index_name} does not exist")
 
-
-    def __make_index(self, vector_dimensions: int, conn):
+    def _make_index(self):
         try:
-            conn.ft(self.index_name).info()
+            self.conn.ft(self.index_name).info()
         except Exception:
             schema = (
                 TextField("text_id"),
@@ -78,16 +76,16 @@ class Redis(VectorDB):
                 TextField("document"),
                 VectorField(
                     "vector",
-                    "HNSW", # Vector Index Type: FLAT or HNSW
-                    {  
+                    "HNSW",  # Vector Index Type: FLAT or HNSW
+                    {
                         "TYPE": "FLOAT32",  # FLOAT32 or FLOAT64
-                        "DIM": vector_dimensions,
+                        "DIM": self.vector_dimension,
                         "DISTANCE_METRIC": "COSINE",
                     },
                 ),
             )
             definition = IndexDefinition(prefix=[self.doc_prefix], index_type=IndexType.HASH)
-            rs = conn.ft(self.index_name)
+            rs = self.conn.ft(self.index_name)
             rs.create_index(schema, definition=definition)
 
         self.conn = redis.Redis(
@@ -120,22 +118,25 @@ class Redis(VectorDB):
                 mapping = {
                     "text_id": ids[i],
                     "vector": embedding.tobytes(),
-                    
+
                 }
 
+
                 if documents:
-                    mapping.update({"document": documents[i]})
+                    if documents[i]:
+                        mapping.update({"document": documents[i]})
 
                 if metadata:
-                    mapping.update(
-                        {
-                            "metadata": ",".join(
-                                [f"{k}:{v}" for k, v in metadata[i].items()]
-                            )
-                        }
-                    )
+                    if metadata[i]:
+                        mapping.update(
+                            {
+                                "metadata": ",".join(
+                                    [f"{k}:{v}" for k, v in metadata[i].items()]
+                                )
+                            }
+                        )
                 pipe.hset(
-                    f"doc:{ids[i]}",
+                    f"{self.doc_prefix}{ids[i]}",
                     mapping=mapping,
                 )
                 if i % batch_size == 0:
@@ -143,7 +144,6 @@ class Redis(VectorDB):
 
             pipe.execute()
 
-    # #TODO: implement filters as expected
     def search_embedding(
         self,
         query: list[float],
@@ -175,15 +175,11 @@ class Redis(VectorDB):
                 query_prefix += "@metadata:{" + str(meta_key) + "\:" + str(meta_value) + "} "
 
             query_prefix = query_prefix.strip()
-    
-        
-
-
 
         query_obj = (
             Query(f"({query_prefix})=>[KNN {k} @vector $vec as distance]")
             .sort_by("distance")
-            .return_fields("id", "text_id", "distance","document","metadata")
+            .return_fields("id", "text_id", "distance", "document", "metadata")
             .paging(0, k)
             .dialect(2)
         )

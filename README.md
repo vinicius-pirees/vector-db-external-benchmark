@@ -40,7 +40,7 @@ It would also be great if the vendors could implement this same test so we have 
 
 ## Infrastructure
 
-The tests will be ran using an AWS EC2 instance: t3.2xlarge (8 vCPUs, 32.0 GiB) 
+The tests will be ran using an AWS EC2 instance: c5a.4xlarge (16 vCPUs, 32.0 GiB) 
 
 
 ## Metrics
