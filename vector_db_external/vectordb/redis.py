@@ -71,9 +71,7 @@ class Redis(VectorDB):
             self.conn.ft(self.index_name).info()
         except Exception:
             schema = (
-                TextField("text_id"),
                 TagField("metadata", separator=","),
-                TextField("document"),
                 VectorField(
                     "vector",
                     "HNSW",  # Vector Index Type: FLAT or HNSW
